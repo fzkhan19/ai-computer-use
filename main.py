@@ -1,14 +1,19 @@
 import pyautogui
 import time
-import os
-import io
 from langchain_ollama import OllamaLLM
-from langchain.prompts import PromptTemplate
-from PIL import Image
 import keyboard
-import pytesseract
-import numpy as np
 import random
+from langchain_google_genai import (
+    ChatGoogleGenerativeAI,
+)
+from langchain_ollama import OllamaLLM
+import google.generativeai as genai
+from dotenv import load_dotenv
+import os
+from datetime import datetime
+
+# Load environment variables
+load_dotenv()
 
 # Set up for natural mouse movements
 pyautogui.MINIMUM_DURATION = 0.3
@@ -19,11 +24,30 @@ pyautogui.FAILSAFE = True
 
 class WindowsAIUser:
     def __init__(self):
-        self.llm = OllamaLLM(model="llava", url="http://localhost:11434")
+        self.llava = OllamaLLM(model="llava", url="http://localhost:11434")
+        gemini_key = os.getenv("GEMINI_API_KEY")
+
+        # Initialize Gemini - you'll need to set your API key
+        genai.configure(api_key=gemini_key)
+        self.gemini = ChatGoogleGenerativeAI(
+            model="gemini-1.5-flash-latest",
+            api_key=gemini_key,
+        )
+
         self.current_app = None
         self.last_click_time = time.time()
         self.action_history = []
         self.current_state = "initial"
+
+    def log_response(self, model_name, response):
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open("ai_responses.log", "a", encoding="utf-8") as log_file:
+            log_file.write(f"\n{'='*50}\n")
+            log_file.write(f"Timestamp: {timestamp}\n")
+            log_file.write(f"Model: {model_name}\n")
+            log_file.write(f"Response:\n{response}\n")
+            log_file.write(f"{'='*50}\n")
+
 
     def move_naturally(self, x, y):
         x += random.randint(-5, 5)
@@ -38,59 +62,50 @@ class WindowsAIUser:
     def analyze_screen(self, task):
         screenshot = pyautogui.screenshot()
 
-        action_context = "\n".join(
-            [f"- {action}" for action in self.action_history[-5:]]
-        )
+        # More specific and direct vision prompt for LLaVa
+        vision_prompt = """You are looking at a Windows 11 computer screen screenshot.
+        Analyze this Windows 11 screenshot and list:
+        1. All visible windows with their titles
+        2. Location of UI elements (buttons, text fields, icons)
+        3. Any visible text content
+        4. Current active window or focused element
+        5. Windows 11 taskbar state and visible icons
+        6. Start menu state if visible
 
-        prompt_template = """
-        You are a Windows user trying to accomplish: {task}
+        Format as a clear, factual list focusing on Windows 11 UI elements."""
 
-        Previous actions taken:
-        {action_context}
+        screen_description = self.llava.invoke(vision_prompt, images=[screenshot])
+        self.log_response("LLaVa", screen_description)
 
-        Current state: {current_state}
+        print("\n::::: LLAVA Screen description :::::\n", screen_description)
 
-        Looking at the current screen:
-        [Screenshot is visible to you]
+        reasoning_prompt = f"""
+            Role: You are a Windows 11 User and you have to perform the given task using the provided set of actions.
+            Task to accomplish: {task}
 
-        Verify if the previous action has been completed.
+            Previous actions taken:
+            {"\n".join([f"- {action}" for action in self.action_history[-5:]])}
 
-        Important: Output only ONE single next action, not a list of steps .
-        Example flows (but only output ONE next action):
-        "Open notepad and type hello":
-        If notepad not open -> START_APP: notepad
-        If notepad visible but no text -> TYPE: hello
-        If text typed -> TASK COMPLETE
+            Current state: {self.current_state}
 
-        "Open Chrome and search cats":
-        If Chrome not open -> START_APP: chrome
-        If Chrome visible but empty -> TYPE: cats
-        If text typed -> SHORTCUT: enter
-        If results visible -> TASK COMPLETE
+            Screen description:
+            {screen_description}
 
-        Choose your ONE next action from:
-        1. TYPE: <text> - Use this to type text
-        2. WINDOWS - Use this to open start menu
-        3. START_APP: <app_name> - Use this to launch specific apps
-        4. CLICK: <x> <y> - Use this for mouse clicks at coordinates
-        5. SHORTCUT: <keys> - Use this for keyboard shortcuts
+            Provide exactly ONE next action from these options:
+            1. TYPE: <text>
+            2. WINDOWS
+            3. START_APP: <app_name>
+            4. PRESS_KEY: <key>
+            5. CLICK: <x> <y>
+            6. SHORTCUT: <keys>
+            7. TASK COMPLETE
 
-        Format your response as a single line with just ONE action.
-        """
-        prompt = PromptTemplate(
-            template=prompt_template,
-            input_variables=["task", "action_context", "current_state"],
-        )
+            Output format: Single line with just the action."""
 
-        action = self.llm.invoke(
-            prompt.format(
-                task=task,
-                action_context=action_context,
-                current_state=self.current_state,
-            ),
-            images=[screenshot],
-        ).strip()
+        action = self.gemini.invoke(reasoning_prompt).content.strip()
+        self.log_response("Gemini", action)
 
+        print("\n::::: GEMINI Action :::::\n", action)
         self.action_history.append(action)
         return action
 
@@ -113,6 +128,11 @@ class WindowsAIUser:
             time.sleep(0.5)
             keyboard.press_and_release("enter")
             self.current_state = f"launching_{app}"
+
+        elif action.startswith("PRESS_KEY:"):
+            key = action.split(":")[1].strip()
+            keyboard.press_and_release(key)
+            self.current_state = f"pressing_key_{key}"
 
         elif action.startswith("CLICK:"):
             _, x, y = action.split()
