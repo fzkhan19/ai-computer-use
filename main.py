@@ -3,10 +3,7 @@ import time
 from langchain_ollama import OllamaLLM
 import keyboard
 import random
-from langchain_google_genai import (
-    ChatGoogleGenerativeAI,
-)
-from langchain_ollama import OllamaLLM
+from langchain_google_genai import ChatGoogleGenerativeAI
 import google.generativeai as genai
 from dotenv import load_dotenv
 import os
@@ -27,7 +24,7 @@ class WindowsAIUser:
         self.llava = OllamaLLM(model="llava", url="http://localhost:11434")
         gemini_key = os.getenv("GEMINI_API_KEY")
 
-        # Initialize Gemini - you'll need to set your API key
+        # Initialize Gemini with API key
         genai.configure(api_key=gemini_key)
         self.gemini = ChatGoogleGenerativeAI(
             model="gemini-1.5-flash-latest",
@@ -48,7 +45,6 @@ class WindowsAIUser:
             log_file.write(f"Response:\n{response}\n")
             log_file.write(f"{'='*50}\n")
 
-
     def move_naturally(self, x, y):
         x += random.randint(-5, 5)
         y += random.randint(-5, 5)
@@ -59,10 +55,19 @@ class WindowsAIUser:
             keyboard.write(char)
             time.sleep(random.uniform(0.05, 0.15))
 
+    def llava_query(self, prompt):
+        # Method to let Gemini query Llava with a specific prompt
+        screenshot = pyautogui.screenshot()
+        query_prompt = "According to the provided screenshot" + prompt
+        response = self.llava.invoke(query_prompt, images=[screenshot])
+        self.log_response("LLaVa (Queried by Gemini)", response)
+        return response
+
     def analyze_screen(self, task):
+        self.llava.invoke("/clear")
         screenshot = pyautogui.screenshot()
 
-        # More specific and direct vision prompt for LLaVa
+        # Direct vision prompt for LLaVa
         vision_prompt = """You are looking at a Windows 11 computer screen screenshot.
         Analyze this Windows 11 screenshot and list:
         1. All visible windows with their titles
@@ -80,33 +85,43 @@ class WindowsAIUser:
         print("\n::::: LLAVA Screen description :::::\n", screen_description)
 
         reasoning_prompt = f"""
-            Role: You are a Windows 11 User and you have to perform the given task using the provided set of actions.
-            Task to accomplish: {task}
+        Role: You are a Windows 11 User and you have to perform the given task using the provided set of actions.
+        Task to accomplish: {task}
 
-            Previous actions taken:
-            {"\n".join([f"- {action}" for action in self.action_history[-5:]])}
+        Previous actions taken:
+        {"\n".join([f"- {action}" for action in self.action_history[-5:]])}
 
-            Current state: {self.current_state}
+        Current state: {self.current_state}
 
-            Screen description:
-            {screen_description}
+        Screen description:
+        {screen_description}
 
-            Provide exactly ONE next action from these options:
-            1. TYPE: <text>
-            2. WINDOWS
-            3. START_APP: <app_name>
-            4. PRESS_KEY: <key>
-            5. CLICK: <x> <y>
-            6. SHORTCUT: <keys>
-            7. TASK COMPLETE
+        Available actions and their effects:
+        1. TYPE: <text> - Types the specified text with natural typing speed and random delays
+        2. WINDOWS - Presses Windows key to open/close Start menu
+        3. START_APP: <app_name> - Opens Windows Start menu, searches for app, and launches it
+        4. PRESS_KEY: <key> - Presses a single keyboard key (e.g., enter, tab, space)
+        5. CLICK: <x> <y> - Moves mouse naturally to coordinates and clicks (you can ask LLaVa for coordinates based on the screen size 1920x1080)
+        6. SHORTCUT: <keys> - Executes keyboard shortcuts (e.g., ctrl+c, alt+tab)
+        7. QUERY_LLAVA: <specific question> - Asks LLaVa to analyze specific details in the current screen
+        8. TASK COMPLETE - Indicates the requested task has been successfully completed
 
-            Output format: Single line with just the action."""
+        If additional specific information is required from the screen, specify the prompt to query LLaVa.
+        Provide exactly ONE next action from the options above.
+
+        Output format: Single line with just the action."""
 
         action = self.gemini.invoke(reasoning_prompt).content.strip()
         self.log_response("Gemini", action)
 
         print("\n::::: GEMINI Action :::::\n", action)
         self.action_history.append(action)
+
+        # If Gemini requests specific info from LLaVa
+        if action.startswith("QUERY_LLAVA:"):
+            specific_query = action.split(":", 1)[1].strip()
+            return f"QUERY_LLAVA: {specific_query}"
+
         return action
 
     def execute_action(self, action):
@@ -145,12 +160,17 @@ class WindowsAIUser:
             keyboard.press_and_release(keys)
             self.current_state = "shortcut"
 
+        elif action.startswith("QUERY_LLAVA:"):
+            specific_query = action.split(":", 1)[1].strip()
+            llava_response = self.llava_query(specific_query)
+            print("\n::::: LLAVA Query Response :::::\n", llava_response)
+            self.log_response("LLaVa Query Result", llava_response)
+
         time.sleep(random.uniform(0.5, 1))
         return True
 
 
 def main():
-
     print("Program started. Press 'esc' to stop at any time.")
     keyboard.on_press_key("esc", lambda _: exit())
 
