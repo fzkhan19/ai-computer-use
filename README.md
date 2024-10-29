@@ -4,7 +4,7 @@
 
 # AI Computer User
 
-An experimental script for using AI to interact with Windows applications through natural mouse movements, keystrokes, and intelligent screen analysis. With the help of **LangChain**, **PyAutoGUI**, and **PyTesseract**, this project automates tasks based on real-time visual and contextual information, enabling a pseudo-user experience powered by an AI-driven approach.
+An experimental script for using AI to interact with Windows applications through natural mouse movements, keystrokes, and intelligent screen analysis. With the help of **LangChain**, **PyAutoGUI**, this project automates tasks based on real-time visual and contextual information, enabling a pseudo-user experience powered by an AI-driven approach.
 
 ## Features
 
